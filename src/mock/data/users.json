@@ -1,0 +1,56 @@
+[
+  {
+    "id": 1,
+    "gid": "G00001",
+    "password": "admin123",
+    "name": "系统管理员",
+    "email": "admin@jci.com",
+    "role": "admin",
+    "department": "IT部"
+  },
+  {
+    "id": 2,
+    "gid": "czhuzz",
+    "password": "123456",
+    "name": "朱智国",
+    "email": "zhiguo.zg.zhu@jci.com",
+    "role": "engineer",
+    "department": "零部件测试"
+  },
+  {
+    "id": 3,
+    "gid": "CLIU250",
+    "password": "123456",
+    "name": "刘京广",
+    "email": "jingguang.liu@jci.com",
+    "role": "admin",
+    "department": "EE"
+  },
+  {
+    "id": 4,
+    "gid": "JFANGUA",
+    "password": "123456",
+    "name": "范广武",
+    "email": "guangwu.fan@jci.com",
+    "role": "keeper",
+    "department": "EE"
+  },
+  {
+    "id": 5,
+    "gid": "JQIAOL1",
+    "password": "123456",
+    "name": "乔黎明",
+    "email": "liming.1.qiao@jci.com",
+    "role": "keeper",
+    "department": "EE"
+  },
+  {
+    "id": 6,
+    "gid": "CKONGKEE",
+    "password": "123456",
+    "name": "孔留网",
+    "email": "Kevin.kong@jci.com",
+    "role": "engineer",
+    "department": "零部件测试"
+  }
+]

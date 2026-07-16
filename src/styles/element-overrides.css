@@ -1,0 +1,62 @@
+/**
+ * Element Plus 主题覆盖
+ * 将品牌色映射到 Element Plus CSS 变量，保证 el-button / el-input 等组件自动继承品牌色
+ */
+:root {
+  /* Element Plus 主色 → 江森蓝 */
+  --el-color-primary: #003366;
+  --el-color-primary-light-3: #335c80;
+  --el-color-primary-light-5: #667f99;
+  --el-color-primary-light-7: #99a8b3;
+  --el-color-primary-light-8: #b3bfcc;
+  --el-color-primary-light-9: #ccd6e0;
+  --el-color-primary-dark-2: #002952;
+
+  /* 语义色 */
+  --el-color-success: #2A9D8F;
+  --el-color-warning: #F4A261;
+  --el-color-danger: #E63946;
+  --el-color-info: #909399;
+
+  /* 字体 */
+  --el-font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  --el-font-size-base: 14px;
+
+  /* 圆角 */
+  --el-border-radius-base: 6px;
+  --el-border-radius-small: 4px;
+  --el-border-radius-round: 20px;
+
+  /* 背景与边框 */
+  --el-bg-color: #FFFFFF;
+  --el-bg-color-page: #F5F7FA;
+  --el-border-color: #E0E0E0;
+  --el-border-color-light: #F0F0F0;
+  --el-fill-color-blank: #FAFAFA;
+}
+
+/* 全局基础重置（保留原型全局样式精神） */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  font-family: var(--jc-font-family);
+  font-size: var(--jc-font-size-body);
+  color: var(--jc-text-dark);
+  background-color: var(--jc-bg-gray);
+  line-height: 1.5;
+}
+
+/* 滚动条（与原型一致） */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--jc-bg-gray); }
+::-webkit-scrollbar-thumb { background: var(--jc-border-line); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--jc-text-muted); }
