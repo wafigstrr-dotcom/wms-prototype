@@ -30,6 +30,7 @@
         </el-select>
       </div>
       <div class="toolbar-right">
+        <el-button @click="exportTemplate"><el-icon><Download /></el-icon> 导出模板</el-button>
         <el-button @click="exportData"><el-icon><Download /></el-icon> 批量导出</el-button>
         <ExcelImport :import-fn="handleImport" @success="loadList" />
         <el-button type="primary" @click="openAdd"><el-icon><Plus /></el-icon> 新增</el-button>
@@ -462,7 +463,7 @@ function handleImport(rows: Record<string, unknown>[]) {
 
 async function exportData() {
   if (!list.value.length) { ElMessage.error('暂无数据可导出'); return }
-  const headers = ['主记录序号', '下单日期', '申请人', '所属人', 'PBU', '所属部门', '项目编号', 'SAP号/图号', '物料名称', 'PR号', 'item号', '采购组', '数量', '免3C', '采购工程师', '供应商代码', '供应商名称', '金额', 'PO号', '交货日期', '发送供方', '备注']
+  const headers = ['主记录序号', '下单日期', '申请人', '所属人', 'PBU', '所属部门', '项目编号', 'SAP 号/图号', '物料名称', 'PR 号', 'item 号', '采购组', '数量', '免 3C', '采购工程师', '供应商代码', '供应商名称', '金额', 'PO 号', '交货日期', '发送供方', '备注']
   const rows = list.value.map((m, i) => [
     i + 1, m.orderDate, m.applicant, m.owner, m.pbu, m.department, m.projectCode, m.sapDrawingNo,
     m.purchaseDescription, m.prNo, m.item, m.purchaseGroup, m.quantity, m.exempt3C, m.purchaseEngineer,
@@ -470,7 +471,7 @@ async function exportData() {
   ] as (string | number)[])
 
   // 子项明细 Sheet：以「主记录序号」作为关联键
-  const subHeaders = ['主记录序号', 'SAP号/图号', '物料名称', '数量']
+  const subHeaders = ['主记录序号', 'SAP 号/图号', '物料名称', '数量']
   const subRows: (string | number)[][] = []
   const results = await Promise.all(list.value.map(m => getSubItems(m.id)))
   list.value.forEach((_m, i) => {
@@ -485,6 +486,33 @@ async function exportData() {
     { name: '子项明细', headers: subHeaders, rows: subRows },
   ])
   ElMessage.success(`已导出 ${rows.length} 条主记录、${subRows.length} 条子项`)
+}
+
+// ==================== 导出导入模板 ====================
+function exportTemplate() {
+  // 导入模板：不包含主记录序号（系统自动生成），仅包含业务字段
+  const headers = ['PO 号', '下单日期', '申请人', '所属人', 'PBU', '所属部门', '项目编号', 'SAP 号/图号', '物料名称', 'PR 号', 'item 号', '采购组', '数量', '免 3C', '采购工程师', '供应商代码', '供应商名称', '金额', '交货日期', '发送供方', '备注']
+  const exampleRows: (string | number)[][] = [
+    [
+      'PO2025031001', '2025-03-06', '朱智国', '张三', 'IR', '研发部', 'PRJ-2025-010', 
+      'SAP-100123', '控制箱线束 - 示例', 'PR2025030001', 'ITEM001', 'PG01', 
+      10, '是', '范广武', 'S0012', '上海精密机械有限公司', 15000.00, 
+      '2025-04-01', '否', '测试用模板',
+    ],
+  ]
+
+  // 子项明细 Sheet：使用 PO 号和 SAP 号作为关联键（而非序号）
+  const subHeaders = ['关联 PO 号', '关联 SAP 号', 'SAP 号/图号', '物料名称', '数量']
+  const subExampleRows: (string | number)[][] = [
+    ['PO2025031001', 'SAP-100123', 'SAP-100123-A', '密封垫片 1', 5],
+    ['PO2025031001', 'SAP-100123', 'SAP-100123-B', '密封垫片 2', 3],
+  ]
+
+  exportSheets('直接物料导入模板', [
+    { name: '主记录', headers, rows: exampleRows },
+    { name: '子项明细', headers: subHeaders, rows: subExampleRows },
+  ])
+  ElMessage.success('模板已下载，请按照格式填写后批量导入')
 }
 
 onMounted(loadList)
