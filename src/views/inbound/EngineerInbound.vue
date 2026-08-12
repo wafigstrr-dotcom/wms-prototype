@@ -2,146 +2,297 @@
   <div class="engineer-inbound">
     <!-- 提示信息 -->
     <el-alert
-      title="工程师入库为简化流程，仅需填写基础信息，提交后将生成电子流转至仓管员补充仓库和货位信息。"
+      title="通过PO号检索直接物料维护数据，在子项「入库数量」下拉框中选择数量即视为选中入库（清空即取消），填写入库原因后提交，生成电子流转单至仓管员补充仓库和货位信息。"
       type="info"
       show-icon
       :closable="false"
       class="engineer-hint"
     />
 
-    <!-- 工具栏 -->
-    <div class="form-toolbar">
-      <div class="toolbar-title">单条录入</div>
-      <div class="toolbar-right">
-        <el-button @click="downloadTemplate('工程师入库模板', engineerTemplateHeaders)">
-          <el-icon><Download /></el-icon> 导出模板
+    <!-- 搜索区 -->
+    <div class="search-section">
+      <div class="search-bar">
+        <el-input
+          v-model="searchKeyword"
+          placeholder="输入PO号搜索直接物料记录（支持模糊匹配）"
+          clearable
+          class="po-search"
+          @keyup.enter="handleSearch"
+          @clear="clearSearch"
+        >
+          <template #prefix>
+            <el-icon><Search /></el-icon>
+          </template>
+        </el-input>
+        <el-button type="primary" :loading="searching" @click="handleSearch">
+          <el-icon><Search /></el-icon> 搜索
         </el-button>
-        <ExcelImport :import-fn="handleImport" />
       </div>
     </div>
 
-    <!-- 表单 -->
-    <div class="form-section-title">
-      <el-icon><Edit /></el-icon>
-      入库信息录入
+    <!-- 搜索结果 -->
+    <div v-loading="searching" class="results-section">
+      <div v-if="searchResults.length > 0" class="results-header">
+        <span>找到 {{ searchResults.length }} 条匹配记录</span>
+      </div>
+
+      <div v-if="!searching && searchResults.length === 0 && hasSearched" class="empty-results">
+        <el-empty description="未找到匹配的直接物料记录" />
+      </div>
+
+      <div v-for="record in searchResults" :key="record.id" class="record-card">
+        <!-- 主记录信息 -->
+        <div class="record-header" @click="toggleExpand(record.id)">
+          <div class="record-main-info">
+            <span class="po-tag">{{ record.poNo }}</span>
+            <span class="record-field">{{ record.purchaseDescription }}</span>
+            <span class="record-field">供应商: {{ record.supplierName || record.supplierCode }}</span>
+            <span class="record-field">数量: {{ record.quantity }}</span>
+            <span class="record-field">下单: {{ record.orderDate }}</span>
+          </div>
+          <el-icon class="expand-icon" :class="{ 'is-expanded': expandedIds.has(record.id) }">
+            <ArrowRight />
+          </el-icon>
+        </div>
+
+        <!-- 子项表格 -->
+        <div v-if="expandedIds.has(record.id)" class="sub-items-section" v-loading="subLoading[record.id]">
+          <el-table :data="subItemsMap[record.id] || []" size="small" border class="sub-table">
+            <el-table-column prop="sapDrawingNo" label="SAP号/图号" min-width="140" />
+            <el-table-column prop="purchaseDescription" label="物料名称" min-width="200" show-overflow-tooltip />
+            <el-table-column prop="quantity" label="原始数量" width="100" align="center" />
+            <el-table-column label="入库数量（选择即入库）" width="160" align="center">
+              <template #default="{ row: sub }">
+                <el-select
+                  v-model="inboundQtyMap[`${record.id}-${sub.id}`]"
+                  placeholder="不入库"
+                  clearable
+                  size="small"
+                  class="qty-select"
+                >
+                  <el-option v-for="n in qtyOptions(sub.quantity)" :key="n" :label="String(n)" :value="n" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <template #empty>
+              <el-empty description="该PO记录暂无子项" :image-size="60" />
+            </template>
+          </el-table>
+        </div>
+      </div>
     </div>
 
-    <el-form
-      ref="formRef"
-      :model="form"
-      :rules="rules"
-      label-position="top"
-      class="form-grid"
-    >
-      <el-form-item label="物料名称" prop="materialName">
-        <el-input v-model="form.materialName" placeholder="请输入物料名称" />
-      </el-form-item>
+    <!-- 底部：已选汇总 + 入库原因 + 提交 -->
+    <div v-if="selectedItems.length > 0" class="selection-summary">
+      <div class="summary-header">
+        <div class="summary-title">
+          <el-icon><Checked /></el-icon>
+          已选 {{ selectedItems.length }} 项待入库
+        </div>
+        <el-button type="danger" size="small" text @click="clearAllSelections">
+          <el-icon><Delete /></el-icon> 清空选择
+        </el-button>
+      </div>
 
-      <el-form-item label="项目编号" prop="projectCode">
-        <el-input v-model="form.projectCode" placeholder="请输入项目编号" />
-      </el-form-item>
+      <div class="selected-list">
+        <div v-for="item in selectedItems" :key="`${item.parentId}-${item.subItemId}`" class="selected-item-row">
+          <div class="selected-item-info">
+            <span class="selected-po">{{ item.poNo }}</span>
+            <span class="selected-name">{{ item.materialName }}</span>
+            <span class="selected-sap" v-if="item.sapDrawingNo">({{ item.sapDrawingNo }})</span>
+            <span class="selected-qty">原始: {{ item.originalQty }}</span>
+          </div>
+          <div class="selected-item-qty">
+            <span>入库:</span>
+            <el-select
+              v-model="inboundQtyMap[`${item.parentId}-${item.subItemId}`]"
+              placeholder="不入库"
+              clearable
+              size="small"
+              class="qty-select-small"
+            >
+              <el-option v-for="n in qtyOptions(item.originalQty)" :key="n" :label="String(n)" :value="n" />
+            </el-select>
+            <el-button type="danger" size="small" text @click="removeItem(item)">
+              <el-icon><Delete /></el-icon>
+            </el-button>
+          </div>
+        </div>
+      </div>
 
-      <el-form-item label="PBU" prop="pbu">
-        <el-select v-model="form.pbu" placeholder="请选择" class="full-width">
-          <el-option v-for="opt in PBU_OPTIONS" :key="opt" :label="opt" :value="opt" />
-        </el-select>
-      </el-form-item>
+      <!-- 入库原因 -->
+      <div class="reason-section">
+        <el-form-item label="入库原因" required class="reason-form-item">
+          <el-input
+            v-model="inboundReason"
+            type="textarea"
+            :rows="2"
+            placeholder="请输入入库原因（必填）"
+          />
+        </el-form-item>
+      </div>
 
-      <el-form-item label="免3C" prop="exempt3C">
-        <el-select v-model="form.exempt3C" placeholder="请选择" class="full-width">
-          <el-option label="是" value="是" />
-          <el-option label="否" value="否" />
-        </el-select>
-      </el-form-item>
-
-      <el-form-item label="PO号" prop="poNumber">
-        <el-input v-model="form.poNumber" placeholder="可输入或选择（如：样品）" list="po-list" />
-        <datalist id="po-list">
-          <option value="样品" />
-        </datalist>
-      </el-form-item>
-
-      <el-form-item label="供应商编号" prop="supplierCode">
-        <el-input v-model="form.supplierCode" placeholder="请输入供应商编号" />
-      </el-form-item>
-
-      <el-form-item label="数量" prop="quantity">
-        <el-input-number v-model="form.quantity" :min="1" :step="1" placeholder="请输入数量" class="full-width" />
-      </el-form-item>
-
-      <el-form-item label="单位" prop="unit">
-        <el-select v-model="form.unit" placeholder="请选择" class="full-width">
-          <el-option v-for="opt in UNIT_OPTIONS" :key="opt" :label="opt" :value="opt" />
-        </el-select>
-      </el-form-item>
-
-      <el-form-item label="单价" prop="unitPrice">
-        <el-input v-model="form.unitPrice" placeholder="0.00" type="number" step="0.01">
-          <template #prefix>¥</template>
-        </el-input>
-      </el-form-item>
-    </el-form>
-
-    <div class="hidden-fields-info">
-      <el-icon><MagicStick /></el-icon>
-      以下字段将由系统自动填充：申请人、所属人、所属部门（根据登录账号自动获取）
-    </div>
-
-    <div class="form-actions">
-      <el-button type="primary" :loading="submitting" @click="handleSubmit">
-        <el-icon v-if="!submitting"><Promotion /></el-icon>
-        {{ submitting ? '提交中...' : '提交申请' }}
-      </el-button>
-      <el-button @click="resetForm">
-        <el-icon><RefreshRight /></el-icon>
-        重置信息
-      </el-button>
+      <!-- 提交按钮 -->
+      <div class="form-actions">
+        <el-button type="primary" :loading="submitting" :disabled="!canSubmit" @click="handleSubmit">
+          <el-icon v-if="!submitting"><Promotion /></el-icon>
+          {{ submitting ? '提交中...' : '提交申请' }}
+        </el-button>
+        <el-button @click="clearAllSelections">
+          <el-icon><RefreshRight /></el-icon> 重置
+        </el-button>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
-import { ElMessage, type FormInstance } from 'element-plus'
-import * as XLSX from 'xlsx'
+import { ref, reactive, computed } from 'vue'
+import { ElMessage } from 'element-plus'
+import { Search, ArrowRight, Checked, Delete, Promotion, RefreshRight } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
-import { createFlow, importInventory } from '@/api/inbound.api'
-import ExcelImport from '@/components/common/ExcelImport.vue'
+import { createFlow } from '@/api/inbound.api'
+import { getDirectMaterials, getSubItems } from '@/api/directMaterial.api'
+import type { DirectMaterial, DirectMaterialSubItem } from '@/types'
 
 const authStore = useAuthStore()
 
-const PBU_OPTIONS = ['AS', 'CS', 'IR', 'BMS', 'SS']
-const UNIT_OPTIONS = ['件', '套', '瓶', '个', '卷', '根', '条', '米', 'KG', '桶', '箱', '把', '张', '盒']
-const engineerTemplateHeaders = ['物料名称', '项目编号', 'PBU', '免3C', 'PO号', '供应商编号', '数量', '单位', '单价']
+// ==================== 搜索状态 ====================
+const searchKeyword = ref('')
+const searching = ref(false)
+const searchResults = ref<DirectMaterial[]>([])
+const hasSearched = ref(false)
 
-const formRef = ref<FormInstance>()
+// ==================== 展开 & 子项 ====================
+const expandedIds = ref<Set<number>>(new Set())
+const subItemsMap = reactive<Record<number, DirectMaterialSubItem[]>>({})
+const subLoading = reactive<Record<number, boolean>>({})
+
+// ==================== 选择状态 ====================
+// 每个子项的入库数量（选择数量=选中入库，清空=不入库）: key = `${parentId}-${subItemId}`
+const inboundQtyMap = reactive<Record<string, number | undefined | ''>>({})
+// 每个子项对应的PO号: key = `${parentId}-${subItemId}`
+const poNoMap = reactive<Record<string, string>>({})
+
+// ==================== 入库原因 ====================
+const inboundReason = ref('')
 const submitting = ref(false)
 
-const form = reactive({
-  materialName: '',
-  projectCode: '',
-  pbu: '',
-  exempt3C: '',
-  poNumber: '',
-  supplierCode: '',
-  quantity: 1,
-  unit: '',
-  unitPrice: 0,
+// ==================== 计算属性 ====================
+const selectedItems = computed(() => {
+  const items: Array<{
+    parentId: number
+    subItemId: number
+    poNo: string
+    sapDrawingNo: string
+    materialName: string
+    originalQty: number
+    inboundQty: number
+  }> = []
+  for (const [key, qty] of Object.entries(inboundQtyMap)) {
+    if (qty == null || qty === '') continue
+    const [parentIdStr, subItemIdStr] = key.split('-')
+    const parentId = Number(parentIdStr)
+    const subItemId = Number(subItemIdStr)
+    const subs = subItemsMap[parentId] || []
+    const sub = subs.find(s => s.id === subItemId)
+    if (!sub) continue
+    items.push({
+      parentId,
+      subItemId,
+      poNo: poNoMap[key] || '',
+      sapDrawingNo: sub.sapDrawingNo,
+      materialName: sub.purchaseDescription,
+      originalQty: sub.quantity,
+      inboundQty: Number(qty),
+    })
+  }
+  return items
 })
 
-const rules = {
-  materialName: [{ required: true, message: '请输入物料名称', trigger: 'blur' }],
-  projectCode: [{ required: true, message: '请输入项目编号', trigger: 'blur' }],
-  pbu: [{ required: true, message: '请选择PBU', trigger: 'change' }],
-  exempt3C: [{ required: true, message: '请选择免3C', trigger: 'change' }],
-  quantity: [{ required: true, message: '请输入数量', trigger: 'blur' }],
-  unit: [{ required: true, message: '请选择单位', trigger: 'change' }],
-  unitPrice: [{ required: true, message: '请输入单价', trigger: 'blur' }],
+const canSubmit = computed(() => selectedItems.value.length > 0 && inboundReason.value.trim().length > 0)
+
+// ==================== 搜索 ====================
+async function handleSearch() {
+  const kw = searchKeyword.value.trim()
+  if (!kw) {
+    ElMessage.warning('请输入PO号或关键词')
+    return
+  }
+  searching.value = true
+  hasSearched.value = true
+  try {
+    const res = await getDirectMaterials({ keyword: kw })
+    searchResults.value = res.data.list || []
+  } catch {
+    ElMessage.error('搜索失败，请重试')
+    searchResults.value = []
+  } finally {
+    searching.value = false
+  }
 }
 
+function clearSearch() {
+  searchResults.value = []
+  hasSearched.value = false
+}
+
+// ==================== 展开/折叠 ====================
+async function toggleExpand(parentId: number) {
+  if (expandedIds.value.has(parentId)) {
+    expandedIds.value.delete(parentId)
+  } else {
+    expandedIds.value.add(parentId)
+    if (!subItemsMap[parentId]) {
+      await loadSubItems(parentId)
+    }
+  }
+}
+
+async function loadSubItems(parentId: number) {
+  subLoading[parentId] = true
+  try {
+    const res = await getSubItems(parentId)
+    subItemsMap[parentId] = res.data || []
+    // 记录子项对应的PO号（提交时使用）；入库数量默认为空（不入库）
+    const record = searchResults.value.find(r => r.id === parentId)
+    for (const sub of subItemsMap[parentId]) {
+      const key = `${parentId}-${sub.id}`
+      if (record && !poNoMap[key]) {
+        poNoMap[key] = record.poNo
+      }
+    }
+  } catch {
+    subItemsMap[parentId] = []
+  } finally {
+    subLoading[parentId] = false
+  }
+}
+
+// ==================== 子项选择 ====================
+// 生成入库数量下拉选项：1 ~ 原始数量
+function qtyOptions(max: number): number[] {
+  return Array.from({ length: Math.max(1, Math.floor(Number(max) || 1)) }, (_, i) => i + 1)
+}
+
+// 移除单个已选子项
+function removeItem(item: { parentId: number; subItemId: number }) {
+  delete inboundQtyMap[`${item.parentId}-${item.subItemId}`]
+}
+
+function clearAllSelections() {
+  for (const key of Object.keys(inboundQtyMap)) {
+    delete inboundQtyMap[key]
+  }
+  inboundReason.value = ''
+}
+
+// ==================== 提交 ====================
 async function handleSubmit() {
-  const valid = await formRef.value?.validate().catch(() => false)
-  if (!valid) return
+  if (!canSubmit.value) {
+    ElMessage.warning('请至少选择一项并填写入库原因')
+    return
+  }
 
   const user = authStore.user
   if (!user) {
@@ -151,8 +302,21 @@ async function handleSubmit() {
 
   submitting.value = true
   try {
+    // 收集所有PO号（去重）
+    const poNos = [...new Set(selectedItems.value.map(i => i.poNo).filter(Boolean))]
+
     const flowData = {
-      ...form,
+      poNos,
+      inboundReason: inboundReason.value.trim(),
+      items: selectedItems.value.map(item => ({
+        parentId: item.parentId,
+        subItemId: item.subItemId,
+        poNo: item.poNo,
+        sapDrawingNo: item.sapDrawingNo,
+        materialName: item.materialName,
+        inboundQty: item.inboundQty,
+        originalQty: item.originalQty,
+      })),
       applicant: user.name,
       owner: user.name,
       department: user.department,
@@ -164,13 +328,18 @@ async function handleSubmit() {
       currentStep: 'keeper_review',
       creator: user.name,
       creatorId: user.id,
-      data: flowData,
+      data: flowData as unknown as Record<string, unknown>,
       approver: '',
     })
 
     if (res.code === 200) {
       ElMessage.success(`入库申请 ${res.data.flowNo} 已提交，等待仓管员处理`)
-      resetForm()
+      // 重置状态
+      searchKeyword.value = ''
+      searchResults.value = []
+      hasSearched.value = false
+      expandedIds.value.clear()
+      clearAllSelections()
     } else {
       ElMessage.error(res.message || '提交失败')
     }
@@ -180,41 +349,93 @@ async function handleSubmit() {
     submitting.value = false
   }
 }
-
-function resetForm() {
-  formRef.value?.resetFields()
-  Object.assign(form, {
-    materialName: '', projectCode: '', pbu: '', exempt3C: '',
-    poNumber: '', supplierCode: '', quantity: 1, unit: '', unitPrice: 0,
-  })
-}
-
-async function handleImport(rows: Record<string, unknown>[]) {
-  return importInventory(rows)
-}
-
-function downloadTemplate(name: string, headers: string[]) {
-  const ws = XLSX.utils.aoa_to_sheet([headers])
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, '模板')
-  XLSX.writeFile(wb, `${name}.xlsx`)
-  ElMessage.success(`${name} 下载成功`)
-}
 </script>
 
 <style scoped>
-.full-width {
-  width: 100%;
-}
-.engineer-inbound {
-  padding: 24px 0;
+.full-width { width: 100%; }
+.engineer-inbound { padding: 24px 0; }
+
+.engineer-hint { margin-bottom: 20px; }
+
+/* 搜索区 */
+.search-section { margin-bottom: 20px; }
+.search-bar { display: flex; gap: 12px; align-items: center; }
+.po-search { width: 420px; }
+
+/* 搜索结果 */
+.results-section { margin-bottom: 20px; }
+.results-header {
+  font-size: 13px;
+  color: var(--jc-text-light);
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--jc-border-line-light);
 }
 
-.engineer-hint {
-  margin-bottom: 20px;
+.empty-results { padding: 20px 0; }
+
+/* 记录卡片 */
+.record-card {
+  border: 1px solid var(--jc-border-line-light);
+  border-radius: var(--jc-radius-card);
+  margin-bottom: 12px;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+.record-card:hover { border-color: var(--jc-accent-teal); }
+
+.record-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  cursor: pointer;
+  background: var(--jc-bg-gray);
+  transition: background 0.2s;
+}
+.record-header:hover { background: var(--jc-hover-bg, #f5f5f5); }
+
+.record-main-info {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 13px;
 }
 
-.form-toolbar {
+.po-tag {
+  background: rgba(0, 128, 128, 0.1);
+  color: var(--jc-accent-teal);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.record-field { color: var(--jc-text-light); }
+
+.expand-icon {
+  transition: transform 0.2s;
+  color: var(--jc-text-light);
+}
+.expand-icon.is-expanded { transform: rotate(90deg); }
+
+/* 子项区 */
+.sub-items-section { padding: 12px 16px; border-top: 1px solid var(--jc-border-line-light); }
+.sub-table { width: 100%; }
+.qty-select { width: 130px; }
+
+/* 已选汇总 */
+.selection-summary {
+  border: 1px solid var(--jc-border-line-light);
+  border-radius: var(--jc-radius-card);
+  padding: 20px;
+  background: var(--jc-card-white);
+  margin-top: 8px;
+}
+
+.summary-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -223,72 +444,81 @@ function downloadTemplate(name: string, headers: string[]) {
   border-bottom: 1px solid var(--jc-border-line-light);
 }
 
-.toolbar-title {
-  font-size: 14px;
+.summary-title {
+  font-size: 15px;
   font-weight: 600;
   color: var(--jc-text-dark);
-}
-
-.toolbar-right {
-  display: flex;
-  gap: 8px;
-}
-
-.form-section-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--jc-text-dark);
-  margin-bottom: 20px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--jc-border-line-light);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+}
+.summary-title .el-icon { color: var(--jc-accent-teal); }
+
+.selected-list {
+  max-height: 240px;
+  overflow-y: auto;
+  margin-bottom: 16px;
 }
 
-.form-section-title .el-icon {
-  color: var(--jc-accent-teal);
-}
-
-.form-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 0 16px;
-}
-
-@media (max-width: 1200px) {
-  .form-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-@media (max-width: 768px) {
-  .form-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-.hidden-fields-info {
+.selected-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-bottom: 4px;
   background: var(--jc-bg-gray);
-  border-radius: var(--jc-radius-control);
-  padding: 12px 16px;
-  margin-top: 16px;
-  font-size: 12px;
-  color: var(--jc-text-light);
+}
+
+.selected-item-info {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  font-size: 13px;
+  flex: 1;
+  min-width: 0;
 }
 
-.hidden-fields-info .el-icon {
+.selected-po {
+  background: rgba(0, 128, 128, 0.1);
   color: var(--jc-accent-teal);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-family: monospace;
+  font-weight: 600;
+  flex-shrink: 0;
 }
 
+.selected-name {
+  color: var(--jc-text-dark);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selected-sap { color: var(--jc-text-light); font-size: 12px; flex-shrink: 0; }
+.selected-qty { color: var(--jc-text-light); font-size: 12px; flex-shrink: 0; }
+
+.selected-item-qty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  flex-shrink: 0;
+  margin-left: 12px;
+}
+.qty-select-small { width: 100px; }
+
+/* 入库原因 */
+.reason-section { margin-bottom: 16px; }
+.reason-form-item { margin-bottom: 0; }
+
+/* 提交按钮 */
 .form-actions {
   display: flex;
   gap: 12px;
-  margin-top: 20px;
-  padding-top: 20px;
+  padding-top: 16px;
   border-top: 1px solid var(--jc-border-line-light);
 }
 </style>

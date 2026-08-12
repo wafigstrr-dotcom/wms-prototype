@@ -92,6 +92,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '仓库配置', roles: ['admin', 'keeper'] },
       },
       {
+        path: 'direct-material',
+        name: 'DirectMaterial',
+        component: () => import('@/views/DirectMaterial.vue'),
+        meta: { title: '直接物料维护', roles: ['admin', 'keeper', 'engineer'] },
+      },
+      {
         path: 'users',
         name: 'Users',
         component: () => import('@/views/Users.vue'),

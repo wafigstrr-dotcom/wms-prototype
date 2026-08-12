@@ -95,6 +95,44 @@ export interface Location extends AuditFields {
   createTime: string
 }
 
+// ==================== 直接物料 ====================
+export interface DirectMaterial extends AuditFields {
+  id: number
+  orderDate: string          // 下单日期 YYYY-MM-DD
+  applicant: string          // 申请人
+  owner: string              // 所属人
+  pbu: string                // PBU（AS/CS/IR/BMS/SS）
+  department: string         // 所属部门
+  projectCode: string        // 项目编号
+  purchaseEngineer: string   // 采购工程师
+  sapDrawingNo: string       // SAP号/图号
+  purchaseDescription: string // 物料名称（原"采购描述"，表头显示为"物料名称"）
+  prNo: string               // PR号
+  item: string               // item号
+  purchaseGroup: string      // 采购组
+  quantity: number           // 数量
+  exempt3C: string           // 免3C（是/否）
+  supplierCode: string       // 供应商代码
+  supplierName: string       // 供应商名称
+  amount: number             // 金额
+  poNo: string               // PO号
+  deliveryDate: string       // 交货日期 YYYY-MM-DD
+  sentToSupplier: '是' | '否' // 发送供方
+  remark: string             // 备注
+  createTime: string
+  subItemCount?: number      // 子项数量（列表接口计算返回，不落库）
+}
+
+// 直接物料子项（BOM 明细）
+export interface DirectMaterialSubItem extends AuditFields {
+  id: number
+  parentId: number            // 关联主记录 DirectMaterial.id
+  sapDrawingNo: string        // SAP号/图号
+  purchaseDescription: string // 物料名称
+  quantity: number            // 数量
+  createTime: string
+}
+
 // ==================== 统一响应体 ====================
 export interface ApiResponse<T = unknown> {
   code: number

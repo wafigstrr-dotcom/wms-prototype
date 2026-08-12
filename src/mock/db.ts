@@ -4,7 +4,7 @@
  * 每个 Db 类对应一个 localforage 实例，数据以 JSON 数组形式存储在单个 key 下
  */
 import localforage from 'localforage'
-import type { User, InventoryItem, Flow, Warehouse, Location } from '../types'
+import type { User, InventoryItem, Flow, Warehouse, Location, DirectMaterial, DirectMaterialSubItem } from '../types'
 
 // ==================== 通用存储工厂 ====================
 function createStore<T>(name: string) {
@@ -51,8 +51,115 @@ const seedLocations: Location[] = [
   { id: 109, warehouseName: 'D', locationCode: 'D-01-02', manager: '乔黎明', size: '2m x 1.5m x 1.8m', createTime: '2025-03-21T08:00:00.000Z' },
 ]
 
+// 业务数据集种子版本：每次递增会在启动时一次性重建业务集合
+// V2：清空全部虚拟业务数据，仅保留 users / warehouses / locations 配置
+// V3：播种 20 条直接物料主记录 + 随机子项（1~6 个/条）
+// V3.1：所有直接物料都必须有 PO 号（修复原逻辑的 75% 概率缺失问题）
+const SEED_VERSION = 3.1
+const BUSINESS_STORES = ['directMaterials', 'directMaterialSubItems', 'inventory', 'flows', 'auction']
+
+// ==================== 业务种子生成（V3，固定种子可复现） ====================
+function mulberry32(seed: number) {
+  return function () {
+    seed |= 0; seed = (seed + 0x6d2b79f5) | 0
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+function buildSeedDirectMaterials(): { materials: DirectMaterial[], subItems: DirectMaterialSubItem[] } {
+  const rand = mulberry32(20260811)
+  const pick = <T,>(arr: T[]): T => arr[Math.floor(rand() * arr.length)]
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const materials: DirectMaterial[] = []
+  const subItems: DirectMaterialSubItem[] = []
+  const pbus = ['AS', 'CS', 'IR', 'BMS', 'SS']
+  const departments = ['EE', '零部件测试', '样机试制']
+  const applicants = ['朱智国', '孔留网', '刘京广']
+  const purchaseEngineers = ['范广武', '乔黎明']
+  const suppliers = [
+    { code: 'S0012', name: '上海精密机械有限公司' },
+    { code: 'S0034', name: '苏州电子科技有限公司' },
+    { code: 'S0056', name: '无锡金属制品有限公司' },
+    { code: 'S0078', name: '南京自动化设备厂' },
+    { code: 'S0091', name: '杭州仪器仪表有限公司' },
+  ]
+  const materialNames = ['压缩机测试样件', '控制箱线束', '室外机钣金件', '电磁阀组件', '传感器支架', '风机电机总成', '换热器铜管', '电控板组件', '阀体铸件', '减震垫组', '接线端子排', '温控器模块']
+  const subNames = ['主体件', '紧固螺钉组', '密封垫片', '线束组件', '安装支架', '防护外壳', '接线端子', '减震垫']
+  let subId = 4001
+  for (let i = 0; i < 20; i++) {
+    const id = 201 + i
+    const month = 1 + Math.floor(rand() * 6)
+    const day = 1 + Math.floor(rand() * 28)
+    const orderDate = `2025-${pad(month)}-${pad(day)}`
+    const delivery = new Date(`${orderDate}T00:00:00Z`)
+    delivery.setUTCDate(delivery.getUTCDate() + 20 + Math.floor(rand() * 20))
+    const sapNo = `SAP-${100000 + Math.floor(rand() * 900000)}`
+    const qty = 2 + Math.floor(rand() * 30)
+    const supplier = pick(suppliers)
+    
+    // V3.1：所有 20 条直接物料都必须有 PO 号（原逻辑 75% 概率→100% 强制）
+    const poNo = `PO2025${pad(month)}${String(1001 + i)}`
+    materials.push({
+      id,
+      orderDate,
+      applicant: pick(applicants),
+      owner: '',
+      pbu: pick(pbus),
+      department: pick(departments),
+      projectCode: `PRJ-2025-${String(i + 1).padStart(3, '0')}`,
+      purchaseEngineer: pick(purchaseEngineers),
+      sapDrawingNo: sapNo,
+      purchaseDescription: `${pick(materialNames)}-${pad(i + 1)}`,
+      prNo: `PR2025${pad(month)}${String(1001 + i)}`,
+      item: String(10000100 + i),
+      purchaseGroup: pick(['PG01', 'PG02', 'PG03']),
+      quantity: qty,
+      exempt3C: rand() > 0.7 ? '是' : '否',
+      supplierCode: supplier.code,
+      supplierName: supplier.name,
+      amount: Math.round(qty * (80 + rand() * 2400)),
+      poNo, // ← 强制生成 PO 号（V3.1）
+      deliveryDate: delivery.toISOString().slice(0, 10),
+      sentToSupplier: rand() > 0.3 ? '是' : '否', // ← sentToSupplier 仍为随机
+      remark: '',
+      createTime: `${orderDate}T08:00:00.000Z`,
+    })
+    // 随机子项数 1~6
+    const subCount = 1 + Math.floor(rand() * 6)
+    for (let j = 0; j < subCount; j++) {
+      subItems.push({
+        id: subId++,
+        parentId: id,
+        sapDrawingNo: `${sapNo}-${String.fromCharCode(65 + j)}`,
+        purchaseDescription: `${pick(subNames)}${j + 1}`,
+        quantity: 1 + Math.floor(rand() * 20),
+        createTime: `${orderDate}T08:00:00.000Z`,
+      })
+    }
+  }
+  // owner 默认同申请人
+  for (const m of materials) m.owner = m.applicant
+  return { materials, subItems }
+}
+
 /** 初始化种子数据（应用启动时调用一次） */
 export async function ensureSeed(): Promise<void> {
+  // 种子版本升级：重建业务数据集（保留用户与仓库配置）
+  const metaStore = createStore<{ seedVersion: number }>('meta')
+  const meta = await metaStore.readAll()
+  if (meta.length === 0 || meta[0].seedVersion < SEED_VERSION) {
+    for (const name of BUSINESS_STORES) {
+      const s = createStore<unknown>(name)
+      await s.writeAll([])
+    }
+    // V3：播种 20 条直接物料 + 随机子项（库存/流程保持为空）
+    const { materials, subItems } = buildSeedDirectMaterials()
+    await createStore<DirectMaterial>('directMaterials').writeAll(materials)
+    await createStore<DirectMaterialSubItem>('directMaterialSubItems').writeAll(subItems)
+    await metaStore.writeAll([{ seedVersion: SEED_VERSION }])
+  }
   const usersStore = createStore<User>('users')
   const existing = await usersStore.readAll()
   if (existing.length === 0) {
@@ -66,8 +173,8 @@ export async function ensureSeed(): Promise<void> {
   const locStore = createStore<Location>('locations')
   const locData = await locStore.readAll()
   if (locData.length === 0) await locStore.writeAll(seedLocations)
-  // 其余集合若不存在则初始化为空数组
-  for (const name of ['inventory', 'flows', 'auction']) {
+  // 业务集合存在性兼容：空则初始化为空数组（直接物料种子已在版本升级时播种）
+  for (const name of BUSINESS_STORES) {
     const s = createStore<unknown>(name)
     const data = await s.readAll()
     if (data.length === 0) await s.writeAll([])
@@ -253,6 +360,100 @@ export const LocationsDb = {
     items[idx] = { ...items[idx], isDeleted: true, updatedAt: new Date().toISOString() }
     await locationsStore.writeAll(items)
     return true
+  },
+}
+
+// ==================== Direct Materials ====================
+const directMaterialsStore = createStore<DirectMaterial>('directMaterials')
+
+export const DirectMaterialDb = {
+  async getAll(): Promise<DirectMaterial[]> {
+    const items = await directMaterialsStore.readAll()
+    return items.filter(m => !m.isDeleted)
+  },
+  async add(item: Omit<DirectMaterial, 'id' | 'createTime'>): Promise<DirectMaterial> {
+    const items = await directMaterialsStore.readAll()
+    const now = new Date().toISOString()
+    const newItem = { ...item, id: Date.now() + Math.floor(Math.random() * 1000), createTime: now, updatedAt: now, isDeleted: false } as DirectMaterial
+    items.push(newItem)
+    await directMaterialsStore.writeAll(items)
+    return newItem
+  },
+  async update(id: number, updates: Partial<DirectMaterial>): Promise<DirectMaterial | null> {
+    const items = await directMaterialsStore.readAll()
+    const idx = items.findIndex(i => i.id === id)
+    if (idx === -1) return null
+    items[idx] = { ...items[idx], ...updates, updatedAt: new Date().toISOString() }
+    await directMaterialsStore.writeAll(items)
+    return items[idx]
+  },
+  // 软删除（级联软删其下所有子项）
+  async remove(id: number): Promise<boolean> {
+    const items = await directMaterialsStore.readAll()
+    const idx = items.findIndex(i => i.id === id)
+    if (idx === -1) return false
+    items[idx] = { ...items[idx], isDeleted: true, updatedAt: new Date().toISOString() }
+    await directMaterialsStore.writeAll(items)
+    await DirectMaterialSubItemDb.removeByParent(id)
+    return true
+  },
+}
+
+// ==================== Direct Material Sub Items ====================
+const directMaterialSubItemsStore = createStore<DirectMaterialSubItem>('directMaterialSubItems')
+
+export const DirectMaterialSubItemDb = {
+  async getByParent(parentId: number): Promise<DirectMaterialSubItem[]> {
+    const items = await directMaterialSubItemsStore.readAll()
+    return items.filter(s => !s.isDeleted && s.parentId === parentId)
+  },
+  // 统计每个父记录的子项数量：Map<parentId, count>
+  async countByParent(): Promise<Record<number, number>> {
+    const items = await directMaterialSubItemsStore.readAll()
+    const map: Record<number, number> = {}
+    for (const s of items) {
+      if (!s.isDeleted) map[s.parentId] = (map[s.parentId] || 0) + 1
+    }
+    return map
+  },
+  async add(parentId: number, item: Omit<DirectMaterialSubItem, 'id' | 'parentId' | 'createTime'>): Promise<DirectMaterialSubItem> {
+    const items = await directMaterialSubItemsStore.readAll()
+    const now = new Date().toISOString()
+    const newItem = { ...item, id: Date.now() + Math.floor(Math.random() * 1000), parentId, createTime: now, updatedAt: now, isDeleted: false } as DirectMaterialSubItem
+    items.push(newItem)
+    await directMaterialSubItemsStore.writeAll(items)
+    return newItem
+  },
+  async update(id: number, updates: Partial<DirectMaterialSubItem>): Promise<DirectMaterialSubItem | null> {
+    const items = await directMaterialSubItemsStore.readAll()
+    const idx = items.findIndex(s => s.id === id)
+    if (idx === -1) return null
+    items[idx] = { ...items[idx], ...updates, updatedAt: new Date().toISOString() }
+    await directMaterialSubItemsStore.writeAll(items)
+    return items[idx]
+  },
+  // 软删除单条
+  async remove(id: number): Promise<boolean> {
+    const items = await directMaterialSubItemsStore.readAll()
+    const idx = items.findIndex(s => s.id === id)
+    if (idx === -1) return false
+    items[idx] = { ...items[idx], isDeleted: true, updatedAt: new Date().toISOString() }
+    await directMaterialSubItemsStore.writeAll(items)
+    return true
+  },
+  // 级联软删：置父记录下所有子项 isDeleted
+  async removeByParent(parentId: number): Promise<number> {
+    const items = await directMaterialSubItemsStore.readAll()
+    const now = new Date().toISOString()
+    let count = 0
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].parentId === parentId && !items[i].isDeleted) {
+        items[i] = { ...items[i], isDeleted: true, updatedAt: now }
+        count++
+      }
+    }
+    if (count > 0) await directMaterialSubItemsStore.writeAll(items)
+    return count
   },
 }
 

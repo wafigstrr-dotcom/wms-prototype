@@ -120,6 +120,7 @@ const menuConfig: MenuSection[] = [
       { label: '报废处理',     icon: 'Delete',            path: '/scrap' },
       { label: '二维码系统',   icon: 'Grid',              path: '/qrcode' },
       { label: '仓库配置',     icon: 'Setting',           path: '/config' },
+      { label: '直接物料维护', icon: 'Document',          path: '/direct-material' },
       { label: '用户设置',     icon: 'UserFilled',        path: '/users', adminOnly: true, roles: ['admin'] },
     ],
   },

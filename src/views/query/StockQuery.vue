@@ -75,6 +75,7 @@
       <el-table-column prop="inboundTime" label="入库时间" width="110"><template #default="{ row }">{{ formatDate(row.inboundTime) }}</template></el-table-column>
       <el-table-column prop="inboundNo" label="入库单号" width="130" />
       <el-table-column prop="remainingStock" label="剩余库存" width="80"><template #default="{ row }"><span :class="{ 'text-danger': row.remainingStock < 10 }">{{ row.remainingStock }}</span></template></el-table-column>
+      <el-table-column label="可用库存" width="80"><template #default="{ row }"><span :class="{ 'text-danger': availableOf(row) <= 0, 'text-available': availableOf(row) > 0 }">{{ availableOf(row) }}</span><el-tooltip v-if="lockedOf(row) > 0" :content="`被出库流程锁定 ${lockedOf(row)} 件`" placement="top"><span class="lock-mark"> 🔒</span></el-tooltip></template></el-table-column>
       <el-table-column prop="agingDays" label="账龄周期" width="80"><template #default="{ row }"><span :class="{ 'text-warning': row.agingDays > 90 }">{{ row.agingDays }}天</span></template></el-table-column>
       <el-table-column prop="dormantDays" label="呆滞周期" width="80"><template #default="{ row }"><span :class="{ 'text-danger': row.dormantDays > 90 }">{{ row.dormantDays }}天</span></template></el-table-column>
       <el-table-column prop="warehouse" label="仓库" width="60" />
@@ -107,6 +108,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getInventoryList, getWarehouses } from '@/api/query.api'
+import { getLockedStock } from '@/api/outbound.api'
 import type { InventoryItem } from '@/api/inventory.api'
 import { exportToExcel, MATERIAL_CATEGORIES } from '@/utils/export'
 import QRLabel from '@/views/qrcode/QRLabel.vue'
@@ -120,6 +122,19 @@ const warehouseList = ref<any[]>([])
 const selectedRows = ref<InventoryItem[]>([])
 const checkAll = ref(false)
 const stats = reactive({ types: 0, total: 0, warehouses: 0, value: 0 })
+// 出库流程锁定量（pending/approving 的领用+报废）: key = inboundNo
+const lockedMap = ref<Record<string, number>>({})
+
+function lockedOf(item: unknown): number {
+  const row = item as InventoryItem
+  return lockedMap.value[row.inboundNo] || 0
+}
+
+// 可用库存 = 剩余库存 − 流程锁定（与出库页口径一致）
+function availableOf(item: unknown): number {
+  const row = item as InventoryItem
+  return Math.max(0, row.remainingStock - lockedOf(row))
+}
 
 const statsValueDisplay = computed(() => '¥' + (stats.value / 10000).toFixed(1) + '万')
 
@@ -127,9 +142,10 @@ function formatDate(iso: string) { return iso ? new Date(iso).toLocaleDateString
 
 async function loadData() {
   try {
-    const [invRes, whRes] = await Promise.all([getInventoryList(), getWarehouses()])
+    const [invRes, whRes, lockedRes] = await Promise.all([getInventoryList(), getWarehouses(), getLockedStock()])
     allData.value = invRes.data.list
     warehouseList.value = whRes.data.list
+    lockedMap.value = lockedRes.data || {}
     computeStats()
     doSearch()
   } catch { /* empty */ }
@@ -162,8 +178,8 @@ function onSelectionChange(rows: InventoryItem[]) { selectedRows.value = rows }
 function onCheckAllChange() { /* handled by el-table */ }
 
 function doExport() {
-  const headers = ['物料名称','物料编号','申请人','项目编号','PBU','免3C','物料类别','所属人','所属部门','PO号','供应商编号','数量','单位','入库时间','入库单号','剩余库存','账龄周期(天)','呆滞周期(天)','仓库','货位']
-  const rows = tableData.value.map(i => [i.materialName, i.materialCode || '-', (i as any).applicant || '-', i.projectCode, i.pbu, i.exempt3C, i.materialCategory, i.owner, i.department, i.poNumber, i.supplierCode, i.quantity, i.unit, formatDate(i.inboundTime), i.inboundNo, i.remainingStock, i.agingDays, i.dormantDays, i.warehouse, i.location])
+  const headers = ['物料名称','物料编号','申请人','项目编号','PBU','免3C','物料类别','所属人','所属部门','PO号','供应商编号','数量','单位','入库时间','入库单号','剩余库存','可用库存','锁定量','账龄周期(天)','呆滞周期(天)','仓库','货位']
+  const rows = tableData.value.map(i => [i.materialName, i.materialCode || '-', (i as any).applicant || '-', i.projectCode, i.pbu, i.exempt3C, i.materialCategory, i.owner, i.department, i.poNumber, i.supplierCode, i.quantity, i.unit, formatDate(i.inboundTime), i.inboundNo, i.remainingStock, availableOf(i), lockedOf(i), i.agingDays, i.dormantDays, i.warehouse, i.location])
   exportToExcel('库存查询', headers, rows, '库存')
   ElMessage.success('导出成功')
 }
@@ -225,5 +241,7 @@ function handleSinglePrint(row: unknown) {
 .search-actions { display: flex; gap: 8px; margin-top: 8px; padding-top: 12px; border-top: 1px solid #f0f0f0; }
 .text-danger { color: #F56C6C; font-weight: 600; }
 .text-warning { color: #E6A23C; font-weight: 600; }
+.text-available { color: #67C23A; font-weight: 600; }
+.lock-mark { cursor: help; font-size: 12px; }
 .qr-preview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px; max-height: 500px; overflow-y: auto; }
 </style>

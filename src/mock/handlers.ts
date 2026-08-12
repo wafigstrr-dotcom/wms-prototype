@@ -12,6 +12,7 @@ import { inboundHandlers } from './inbound.mock'
 import { queryHandlers } from './query.mock'
 import { outboundHandlers } from './outbound.mock'
 import { auctionHandlers } from './auction.mock'
+import { directMaterialHandlers } from './directMaterial.mock'
 
 export const handlers = [
   ...authHandlers,
@@ -24,4 +25,5 @@ export const handlers = [
   ...queryHandlers,
   ...outboundHandlers,
   ...auctionHandlers,
+  ...directMaterialHandlers,
 ]

@@ -19,6 +19,23 @@ export function exportToExcel(
   XLSX.writeFile(wb, `${filename}.xlsx`)
 }
 
+/**
+ * 多工作表 Excel 导出工具
+ * @param filename 文件名（不含后缀）
+ * @param sheets 工作表数组，每个含 name/headers/rows
+ */
+export function exportSheets(
+  filename: string,
+  sheets: { name: string; headers: string[]; rows: (string | number)[][] }[],
+): void {
+  const wb = XLSX.utils.book_new()
+  for (const s of sheets) {
+    const ws = XLSX.utils.aoa_to_sheet([s.headers, ...s.rows])
+    XLSX.utils.book_append_sheet(wb, ws, s.name)
+  }
+  XLSX.writeFile(wb, `${filename}.xlsx`)
+}
+
 /** 物料类别选项（全局复用） */
 export const MATERIAL_CATEGORIES = [
   '室外机', '室内机', '压缩机', '控制箱',
